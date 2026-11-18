@@ -80,7 +80,7 @@ jobs:
 
       - name: Build portable packages
         id: build
-        uses: ok-oldking/pyappify-action@69bf7ae364e8c7f0606f34df86d432168a46f4bf
+        uses: ok-oldking/pyappify-action@master
         with:
           version: v1.2.8
           build_setup: false
