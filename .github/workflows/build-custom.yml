@@ -108,19 +108,33 @@ jobs:
           git push -f $url "refs/tags/$tag"
           Write-Host "pushed runtime tree as tag $tag"
 
-      - name: Build portable packages
+      - name: Build the launcher
         id: build
         uses: ok-oldking/pyappify-action@master
         with:
           version: v1.2.8
           app_version: v${{ steps.v.outputs.version }}
-          # Ship the launcher only. The offline 7z bundled the whole 1.2 GB clone
-          # plus a 344 MB Python env; the setup/zip installs Python and the
-          # dependencies on first run instead, from the profile's requirements.
-          build_setup: true
-          use_git_url: true
+          # Launcher only. Both other outputs embed the clone and a full Python
+          # environment: the offline zip reached 1.24 GB and the setup installer
+          # ran past 35 minutes in the packaging step. The launcher pulls the
+          # runtime tag and installs dependencies on first run instead.
+          build_exe_only: true
+          build_setup: false
           package_zip: false
-          add_version_name: true
+
+      - name: Package the launcher
+        shell: pwsh
+        run: |
+          $exe = "${{ steps.build.outputs.exe-path }}"
+          if (-not (Test-Path $exe)) { throw "launcher not found at $exe" }
+          $stage = Join-Path $env:RUNNER_TEMP "launcher"
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item $exe (Join-Path $stage "ok-ww.exe") -Force
+          Copy-Item pyappify.yml $stage -Force
+          if (Test-Path icons) { Copy-Item icons $stage -Recurse -Force }
+          New-Item -ItemType Directory -Force pyappify_dist | Out-Null
+          Compress-Archive -Path (Join-Path $stage "*") -DestinationPath "pyappify_dist/ok-ww-win32-${{ steps.v.outputs.version }}.zip" -Force
+          Get-ChildItem pyappify_dist | Format-Table Name, Length
 
       - name: Collect diagnostics
         if: failure()
