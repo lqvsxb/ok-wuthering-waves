@@ -187,7 +187,7 @@ config = {
             'use_npu': True,
         }
     },
-    'plugin': False,
+    'plugin': True,  # Custom: 启用 GUI 插件管理页（上游默认 False）
     'my_app': ['src.globals', 'Globals'],
     'start_timeout': 120,  # default 60
     'wait_until_settle_time': 0,
