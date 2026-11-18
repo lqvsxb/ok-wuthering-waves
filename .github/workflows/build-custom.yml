@@ -130,6 +130,6 @@ jobs:
           target_commitish: Custom
           name: v${{ steps.v.outputs.version }}
           files: pyappify_dist/*
-          draft: false
+          draft: true
           prerelease: false
           generate_release_notes: true
