@@ -6,8 +6,9 @@ keep_releases: 30
 
 profiles:
   - name: "China"
-    # Custom: 不设 git_url，配合 use_git_url: false 直接打包本地文件，
-    # 避免克隆 1.2 GB 仓库（克隆会把 ok_templates 的长文件名带回来）。
+    # Custom: 更新源指向本仓库。启动器按 tag 取运行时快照，
+    # tag 由 CI 从 deploy.txt 生成（只含运行时文件），因此不含 ok_templates。
+    git_url: "https://github.com/lqvsxb/ok-wuthering-waves.git"
     admin: true
     main_script: "main.py"
     requires_python: "3.12"
@@ -18,7 +19,8 @@ profiles:
     # PYTHONPATH: "your/default/path" # Optional, will be "" if missing
 
   - name: "Global"
-    # Custom: 同上，Global profile 也不设 git_url。
+    # Custom: 同上，更新源同样指向本仓库。
+    git_url: "https://github.com/lqvsxb/ok-wuthering-waves.git"
     main_script: "main.py"
     requirements: "requirements.txt"
 
