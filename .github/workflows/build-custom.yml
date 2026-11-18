@@ -1,13 +1,15 @@
 name: Build Custom release
-run-name: Custom build · ${{ inputs.version }}
+run-name: Custom build · ${{ inputs.version || github.ref_name }}
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       version:
         description: 'Release version without the leading v, e.g. 3.8.6'
-        required: true
-        default: '3.8.6'
+        required: false
 
 concurrency:
   group: custom-release
@@ -24,7 +26,7 @@ env:
 jobs:
   build:
     name: Build portable package
-    if: github.ref == 'refs/heads/Custom'
+    if: github.ref == 'refs/heads/Custom' || startsWith(github.ref, 'refs/tags/')
     runs-on: windows-latest
 
     steps:
@@ -54,8 +56,16 @@ jobs:
       - name: Install dependencies
         run: python .github/scripts/install_dependencies.py
 
-      - name: Name the build
-        run: git tag -f v${{ inputs.version }}
+      - name: Resolve version
+        id: v
+        shell: pwsh
+        run: |
+          $v = "${{ inputs.version }}"
+          if ([string]::IsNullOrWhiteSpace($v)) { $v = "${{ github.ref_name }}" }
+          $v = $v.TrimStart("v")
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "Packaging version $v"
+          git tag -f "v$v"
 
       - name: Trim the source tree
         shell: pwsh
@@ -93,9 +103,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: v${{ inputs.version }}
+          tag_name: v${{ steps.v.outputs.version }}
           target_commitish: Custom
-          name: v${{ inputs.version }}
+          name: v${{ steps.v.outputs.version }}
           files: pyappify_dist/*
           draft: false
           prerelease: false
