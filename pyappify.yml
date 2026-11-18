@@ -1,0 +1,27 @@
+name: "ok-ww"
+uac: true
+icon: "icons/icon.png"
+website: "http://ok-script.com/ok-ww"
+keep_releases: 30
+
+profiles:
+  - name: "China"
+    # Custom: 更新源指向本仓库。启动器按 tag 取运行时快照，
+    # tag 由 CI 从 deploy.txt 生成（只含运行时文件），因此不含 ok_templates。
+    git_url: "https://github.com/lqvsxb/ok-wuthering-waves.git"
+    admin: true
+    main_script: "main.py"
+    requires_python: "3.12"
+    requirements: "requirements.txt"
+    use_pythonw: true
+    pip_args: "--no-deps"
+    show_add_defender: true
+    # PYTHONPATH: "your/default/path" # Optional, will be "" if missing
+
+  - name: "Global"
+    # Custom: 同上，更新源同样指向本仓库。
+    git_url: "https://github.com/lqvsxb/ok-wuthering-waves.git"
+    main_script: "main.py"
+    requirements: "requirements.txt"
+
+
