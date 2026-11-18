@@ -90,6 +90,29 @@ jobs:
           package_zip_updater: false
           add_version_name: true
 
+      - name: Collect diagnostics
+        if: failure()
+        shell: pwsh
+        run: |
+          $md = New-Object System.Collections.Generic.List[string]
+          $md.Add("## Build diagnostics")
+          $logs = Get-ChildItem -Path . -Recurse -Filter *.log -ErrorAction SilentlyContinue |
+                  Sort-Object LastWriteTime -Descending | Select-Object -First 3
+          foreach ($f in $logs) {
+            $md.Add("### " + $f.FullName)
+            $md.Add('```')
+            $md.Add((Get-Content $f.FullName -Tail 80) -join "`n")
+            $md.Add('```')
+          }
+          if (Test-Path pyappify_dist) {
+            $md.Add("### pyappify_dist tree")
+            $md.Add('```')
+            $md.Add(((Get-ChildItem pyappify_dist -Recurse -ErrorAction SilentlyContinue |
+                      Select-Object -First 40 -ExpandProperty FullName) -join "`n"))
+            $md.Add('```')
+          }
+          ($md -join "`n") | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
