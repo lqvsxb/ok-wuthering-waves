@@ -1,0 +1,136 @@
+name: Build offline package
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version without the leading v'
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version without the leading v, e.g. 3.8.13'
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  PYTHON_VERSION: '3.12'
+  PYTHONIOENCODING: 'UTF-8'
+  PYTHONLEGACYWINDOWSSTDIO: 'UTF-8'
+
+jobs:
+  offline:
+    name: Build offline 7z
+    runs-on: windows-latest
+
+    steps:
+      - name: Configure runner
+        shell: pwsh
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          ref: Custom
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            pyproject.toml
+
+      - name: Require an existing release tag
+        shell: pwsh
+        run: |
+          $tag = "v${{ inputs.version }}"
+          git ls-remote --exit-code --tags origin "refs/tags/$tag" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "$tag does not exist yet; run the launcher build first" }
+          Write-Host "$tag found"
+
+      - name: Install dependencies
+        run: python .github/scripts/install_dependencies.py
+
+      - name: Prepare release requirements
+        env:
+          RELEASE_TAG: v${{ inputs.version }}
+        run: python -m ok.update.inline_ok_requirements --tag "$env:RELEASE_TAG"
+
+      - name: Trim to the runtime set
+        shell: pwsh
+        run: |
+          # Upstream's offline package stays small because it clones its update
+          # repo, which only carries deploy.txt paths. With no such repo here the
+          # action packages this checkout, so remove everything deploy.txt does
+          # not list. ok_templates also has to go: its generated names run close
+          # to 190 characters and overflow the 260-character path limit once the
+          # package nests them.
+          $remove = @('docs', 'tests', '.agents', '.codex', '.github', 'readme', 'ok_templates', '__pycache__')
+          foreach ($item in $remove) {
+            if (Test-Path $item) { Remove-Item -Recurse -Force $item }
+          }
+          Get-ChildItem -Recurse -Directory -Filter __pycache__ -ErrorAction SilentlyContinue |
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          Write-Host "remaining top level:"
+          Get-ChildItem -Name | ForEach-Object { Write-Host "  $_" }
+
+      - name: Build offline package
+        id: build
+        uses: ok-oldking/pyappify-action@master
+        with:
+          version: v1.2.8
+          build_setup: false
+          use_git_url: false
+          package_zip: true
+          package_zip_format: 7z
+          package_zip_updater: false
+          add_version_name: true
+
+      - name: Collect diagnostics
+        if: failure()
+        shell: pwsh
+        run: |
+          $md = New-Object System.Collections.Generic.List[string]
+          $md.Add("## Offline build diagnostics")
+          Get-ChildItem -Path . -Recurse -Filter *.log -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 3 | ForEach-Object {
+              $md.Add("### " + $_.FullName)
+              $md.Add('```')
+              $md.Add((Get-Content $_.FullName -Tail 80) -join "`n")
+              $md.Add('```')
+            }
+          if (Test-Path pyappify_dist) {
+            $md.Add("### pyappify_dist")
+            $md.Add('```')
+            $md.Add(((Get-ChildItem pyappify_dist -Recurse | Select-Object -First 40 -ExpandProperty FullName) -join "`n"))
+            $md.Add('```')
+          }
+          ($md -join "`n") | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-package
+          path: pyappify_dist/*
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Attach to the release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ inputs.version }}
+          files: pyappify_dist/*
+          draft: true
+          prerelease: false
