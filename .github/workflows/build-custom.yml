@@ -83,5 +83,5 @@ jobs:
         with:
           files: pyappify_dist/*
           draft: false
-          prerelease: true
+          prerelease: false
           generate_release_notes: true
