@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version without the leading v, e.g. 3.8.9'
+        description: 'Release version without the leading v, e.g. 3.8.15'
         required: false
 
 concurrency:
@@ -25,7 +25,7 @@ env:
 
 jobs:
   build:
-    name: Build portable package
+    name: Build offline package
     if: github.ref == 'refs/heads/Custom' || startsWith(github.ref, 'refs/tags/')
     runs-on: windows-latest
     outputs:
@@ -78,11 +78,10 @@ jobs:
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # The launcher treats version tags as installable snapshots, so a tag must
-          # carry the runtime tree only. deploy.txt lists exactly that set (ok/ and
-          # pyappify/ were just inlined into it by the previous step), which also
-          # keeps ok_templates away: its ~190-character file names overflow the
-          # Windows 260-character limit once nested in the launcher's working dir.
+          # The tag carries the runtime tree only: deploy.txt lists exactly that
+          # set (ok/ and pyappify/ were just inlined into it), which keeps
+          # ok_templates out. Its generated names run close to 190 characters and
+          # overflow the 260-character path limit once the package nests them.
           $tag = "v${{ steps.v.outputs.version }}"
           $dest = Join-Path $env:RUNNER_TEMP "deploy"
           New-Item -ItemType Directory -Force $dest | Out-Null
@@ -95,7 +94,7 @@ jobs:
             Copy-Item -Path $p -Destination (Join-Path $dest (Split-Path $p -Leaf)) -Recurse -Force
             $copied++
           }
-          Write-Host "copied $copied deploy.txt entries into $dest"
+          Write-Host "copied $copied deploy.txt entries"
           if ($copied -lt 5) { throw "deploy tree looks empty" }
 
           Set-Location $dest
@@ -108,35 +107,34 @@ jobs:
           $url = "https://x-access-token:$env:TOKEN@github.com/lqvsxb/ok-wuthering-waves.git"
           git push -f $url "HEAD:refs/heads/deploy"
           git push -f $url "refs/tags/$tag"
-          Write-Host "pushed runtime tree as tag $tag"
+          Write-Host "pushed runtime tree as $tag"
 
-      - name: Build the launcher
+      - name: Trim to the runtime set
+        shell: pwsh
+        run: |
+          # The archive is built from this checkout, so drop everything deploy.txt
+          # does not list. Upstream avoids this by cloning a runtime-only update
+          # repo; with a single repository, trimming is the equivalent.
+          $remove = @('docs', 'tests', '.agents', '.codex', '.github', 'readme', 'ok_templates', '__pycache__')
+          foreach ($item in $remove) {
+            if (Test-Path $item) { Remove-Item -Recurse -Force $item }
+          }
+          Get-ChildItem -Recurse -Directory -Filter __pycache__ -ErrorAction SilentlyContinue |
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          Write-Host "remaining top level:"
+          Get-ChildItem -Name | ForEach-Object { Write-Host "  $_" }
+
+      - name: Build offline package
         id: build
         uses: ok-oldking/pyappify-action@master
         with:
           version: v1.2.8
-          app_version: v${{ steps.v.outputs.version }}
-          # Launcher only. Both other outputs embed the clone and a full Python
-          # environment: the offline zip reached 1.24 GB and the setup installer
-          # ran past 35 minutes in the packaging step. The launcher pulls the
-          # runtime tag and installs dependencies on first run instead.
-          build_exe_only: true
           build_setup: false
-          package_zip: false
-
-      - name: Package the launcher
-        shell: pwsh
-        run: |
-          $exe = "${{ steps.build.outputs.exe-path }}"
-          if (-not (Test-Path $exe)) { throw "launcher not found at $exe" }
-          $stage = Join-Path $env:RUNNER_TEMP "launcher"
-          New-Item -ItemType Directory -Force $stage | Out-Null
-          Copy-Item $exe (Join-Path $stage "ok-ww.exe") -Force
-          Copy-Item pyappify.yml $stage -Force
-          if (Test-Path icons) { Copy-Item icons $stage -Recurse -Force }
-          New-Item -ItemType Directory -Force pyappify_dist | Out-Null
-          Compress-Archive -Path (Join-Path $stage "*") -DestinationPath "pyappify_dist/ok-ww-win32-${{ steps.v.outputs.version }}.zip" -Force
-          Get-ChildItem pyappify_dist | Format-Table Name, Length
+          use_git_url: false
+          package_zip: true
+          package_zip_format: 7z
+          package_zip_updater: false
+          add_version_name: true
 
       - name: Collect diagnostics
         if: failure()
@@ -144,19 +142,17 @@ jobs:
         run: |
           $md = New-Object System.Collections.Generic.List[string]
           $md.Add("## Build diagnostics")
-          $logs = Get-ChildItem -Path . -Recurse -Filter *.log -ErrorAction SilentlyContinue |
-                  Sort-Object LastWriteTime -Descending | Select-Object -First 3
-          foreach ($f in $logs) {
-            $md.Add("### " + $f.FullName)
-            $md.Add('```')
-            $md.Add((Get-Content $f.FullName -Tail 80) -join "`n")
-            $md.Add('```')
-          }
+          Get-ChildItem -Path . -Recurse -Filter *.log -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 3 | ForEach-Object {
+              $md.Add("### " + $_.FullName)
+              $md.Add('```')
+              $md.Add((Get-Content $_.FullName -Tail 80) -join "`n")
+              $md.Add('```')
+            }
           if (Test-Path pyappify_dist) {
-            $md.Add("### pyappify_dist tree")
+            $md.Add("### pyappify_dist")
             $md.Add('```')
-            $md.Add(((Get-ChildItem pyappify_dist -Recurse -ErrorAction SilentlyContinue |
-                      Select-Object -First 40 -ExpandProperty FullName) -join "`n"))
+            $md.Add(((Get-ChildItem pyappify_dist -Recurse | Select-Object -First 40 -ExpandProperty FullName) -join "`n"))
             $md.Add('```')
           }
           ($md -join "`n") | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
@@ -164,7 +160,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: custom-package
+          name: offline-package
           path: pyappify_dist/*
           if-no-files-found: warn
           retention-days: 7
@@ -180,10 +176,3 @@ jobs:
           draft: true
           prerelease: false
           generate_release_notes: true
-
-  offline:
-    name: Build offline package
-    needs: build
-    uses: ./.github/workflows/build-offline.yml
-    with:
-      version: ${{ needs.build.outputs.version }}
